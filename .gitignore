@@ -43,3 +43,9 @@ Thumbs.db
 # Uncomment these if the files get too large:
 # data/*.db
 # data/*.csv
+
+# Generated images
+*.gif
+*.png
+*.jpg
+*.jpeg

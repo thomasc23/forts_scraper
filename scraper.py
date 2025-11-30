@@ -10,7 +10,11 @@ import requests
 from bs4 import BeautifulSoup
 
 from config import REQUEST_DELAY, REQUEST_TIMEOUT, USER_AGENT, DATA_DIR
-from db import get_connection, init_db, insert_fort, insert_period, log_scrape, get_scrape_status, get_stats
+from db import (
+    get_connection, init_db, insert_fort, insert_period, log_scrape,
+    get_scrape_status, get_stats, get_forts_to_geocode, update_geocoding,
+    get_geocoding_stats
+)
 from discover_urls import discover_all_us_pages, get_session
 from parser import parse_page, entry_to_dict
 
@@ -185,6 +189,111 @@ def test_single_page(url: str):
         print(f"... and {len(entries) - 10} more entries")
 
 
+def geocode_forts(api_key: str, limit: int = None, delay: float = 0.05):
+    """
+    Geocode forts that haven't been geocoded yet.
+
+    Args:
+        api_key: Google Geocoding API key
+        limit: Maximum number of forts to process (None = all)
+        delay: Delay between API calls in seconds
+    """
+    from geocoder import geocode_fort
+
+    print("=" * 60)
+    print("Fort Geocoding")
+    print(f"Started: {datetime.now().isoformat()}")
+    print("=" * 60)
+
+    conn = get_connection()
+
+    # Get forts to geocode
+    forts = get_forts_to_geocode(conn, limit)
+    total = len(forts)
+
+    if total == 0:
+        print("\nNo forts pending geocoding.")
+        conn.close()
+        return
+
+    print(f"\nForts to geocode: {total}")
+    if limit:
+        print(f"(Limited to {limit})")
+    print("-" * 60)
+
+    # Process each fort
+    success_count = 0
+    failed_count = 0
+    start_time = time.time()
+
+    for i, fort in enumerate(forts, 1):
+        result = geocode_fort(
+            fort["location_text"],
+            fort["state_full_name"],
+            api_key,
+            delay=delay
+        )
+
+        # Update database
+        update_geocoding(
+            conn,
+            fort["fort_id"],
+            result.lat,
+            result.lon,
+            result.confidence,
+            result.source,
+            result.query
+        )
+        conn.commit()
+
+        # Track stats
+        if result.confidence != "failed":
+            success_count += 1
+        else:
+            failed_count += 1
+
+        # Progress output
+        if i % 100 == 0 or i == total:
+            elapsed = time.time() - start_time
+            rate = i / elapsed if elapsed > 0 else 0
+            eta = (total - i) / rate if rate > 0 else 0
+            print(f"  [{i}/{total}] {success_count} success, {failed_count} failed "
+                  f"({rate:.1f}/sec, ETA: {eta:.0f}s)")
+
+    conn.close()
+
+    # Summary
+    print("\n" + "=" * 60)
+    print("GEOCODING COMPLETE")
+    print("=" * 60)
+    print(f"Processed: {total}")
+    print(f"Success: {success_count}")
+    print(f"Failed: {failed_count}")
+    print(f"Duration: {time.time() - start_time:.1f}s")
+
+
+def show_geocoding_stats():
+    """Show geocoding progress statistics."""
+    conn = get_connection()
+    stats = get_geocoding_stats(conn)
+    conn.close()
+
+    print("=" * 60)
+    print("Geocoding Statistics")
+    print("=" * 60)
+    print(f"Total forts:     {stats['total_forts']}")
+    print(f"Geocoded:        {stats['geocoded']}")
+    print(f"Pending:         {stats['pending']}")
+
+    pct = (stats['geocoded'] / stats['total_forts'] * 100) if stats['total_forts'] > 0 else 0
+    print(f"Progress:        {pct:.1f}%")
+
+    if stats['by_confidence']:
+        print("\nBy confidence level:")
+        for level, count in sorted(stats['by_confidence'].items()):
+            print(f"  {level}: {count}")
+
+
 def export_csv():
     """Export database to CSV files."""
     import csv
@@ -229,6 +338,12 @@ def export_csv():
 
 
 def main():
+    import os
+    from dotenv import load_dotenv
+
+    # Load .env file if it exists
+    load_dotenv()
+
     parser = argparse.ArgumentParser(description="Scrape fort data from northamericanforts.com")
     parser.add_argument("--force", action="store_true", help="Re-scrape pages even if already done")
     parser.add_argument("--limit", type=int, help="Maximum number of pages to scrape (for testing)")
@@ -236,6 +351,12 @@ def main():
     parser.add_argument("--export", action="store_true", help="Export database to CSV")
     parser.add_argument("--stats", action="store_true", help="Show database statistics")
     parser.add_argument("--discover", action="store_true", help="Only discover URLs, don't scrape")
+
+    # Geocoding options
+    parser.add_argument("--geocode", action="store_true", help="Geocode forts using Google API")
+    parser.add_argument("--geocode-stats", action="store_true", help="Show geocoding statistics")
+    parser.add_argument("--geocode-limit", type=int, help="Limit number of forts to geocode")
+    parser.add_argument("--api-key", type=str, help="Google Geocoding API key (or set GOOGLE_GEOCODING_API_KEY env var)")
 
     args = parser.parse_args()
 
@@ -252,6 +373,15 @@ def main():
     elif args.discover:
         pages = discover_all_us_pages()
         print(json.dumps(pages, indent=2))
+    elif args.geocode_stats:
+        show_geocoding_stats()
+    elif args.geocode:
+        # Get API key from argument or environment
+        api_key = args.api_key or os.environ.get("GOOGLE_GEOCODING_API_KEY")
+        if not api_key:
+            print("ERROR: Google API key required. Use --api-key or set GOOGLE_GEOCODING_API_KEY environment variable.")
+            sys.exit(1)
+        geocode_forts(api_key, limit=args.geocode_limit)
     else:
         scrape_all(force=args.force, limit=args.limit)
 

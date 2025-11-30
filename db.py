@@ -199,6 +199,71 @@ def get_stats(conn: sqlite3.Connection) -> dict:
     return stats
 
 
+def get_forts_to_geocode(conn: sqlite3.Connection, limit: Optional[int] = None) -> list:
+    """Get forts that haven't been geocoded yet."""
+    cursor = conn.cursor()
+    query = """
+        SELECT fort_id, location_text, state_full_name
+        FROM forts
+        WHERE geocode_confidence IS NULL
+        AND location_text IS NOT NULL
+        AND location_text != ''
+    """
+    if limit:
+        query += f" LIMIT {limit}"
+
+    cursor.execute(query)
+    return [dict(row) for row in cursor.fetchall()]
+
+
+def update_geocoding(
+    conn: sqlite3.Connection,
+    fort_id: int,
+    lat: Optional[float],
+    lon: Optional[float],
+    confidence: str,
+    source: str,
+    query: str
+):
+    """Update a fort's geocoding information."""
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE forts SET
+            lat = ?,
+            lon = ?,
+            geocode_confidence = ?,
+            geocode_source = ?,
+            geocode_query = ?,
+            geocoded_at = ?
+        WHERE fort_id = ?
+        """,
+        (lat, lon, confidence, source, query, datetime.now().isoformat(), fort_id),
+    )
+
+
+def get_geocoding_stats(conn: sqlite3.Connection) -> dict:
+    """Get geocoding statistics."""
+    cursor = conn.cursor()
+    stats = {}
+
+    cursor.execute("SELECT COUNT(*) as count FROM forts")
+    stats["total_forts"] = cursor.fetchone()["count"]
+
+    cursor.execute("SELECT COUNT(*) as count FROM forts WHERE geocode_confidence IS NOT NULL")
+    stats["geocoded"] = cursor.fetchone()["count"]
+
+    cursor.execute("SELECT COUNT(*) as count FROM forts WHERE geocode_confidence IS NULL AND location_text IS NOT NULL AND location_text != ''")
+    stats["pending"] = cursor.fetchone()["count"]
+
+    cursor.execute(
+        "SELECT geocode_confidence, COUNT(*) as count FROM forts WHERE geocode_confidence IS NOT NULL GROUP BY geocode_confidence"
+    )
+    stats["by_confidence"] = {row["geocode_confidence"]: row["count"] for row in cursor.fetchall()}
+
+    return stats
+
+
 if __name__ == "__main__":
     init_db()
     print("Database initialized successfully.")

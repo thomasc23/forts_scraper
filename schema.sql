@@ -1,5 +1,5 @@
 -- North American Forts Database Schema
--- Part 1: Scraping (no geocoding yet)
+-- Part 1: Scraping + Part 2: Geocoding
 
 -- Core forts table: one row per unique fort/site
 CREATE TABLE IF NOT EXISTS forts (
@@ -38,6 +38,14 @@ CREATE TABLE IF NOT EXISTS forts (
 
     -- Metadata
     scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Geocoding (Part 2)
+    lat REAL,                          -- Latitude
+    lon REAL,                          -- Longitude
+    geocode_confidence TEXT,           -- exact, locality, approximate, county, state, failed
+    geocode_source TEXT,               -- google, nominatim, manual
+    geocode_query TEXT,                -- The query string used for geocoding
+    geocoded_at TIMESTAMP,
 
     -- Ensure no duplicate entries from same source
     UNIQUE(name_primary, state_territory, source_url)
@@ -104,6 +112,7 @@ CREATE TABLE IF NOT EXISTS scrape_log (
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_forts_state ON forts(state_territory);
 CREATE INDEX IF NOT EXISTS idx_forts_years ON forts(earliest_year, latest_year);
+CREATE INDEX IF NOT EXISTS idx_forts_geocoded ON forts(geocode_confidence);
 CREATE INDEX IF NOT EXISTS idx_periods_fort ON fort_periods(fort_id);
 CREATE INDEX IF NOT EXISTS idx_names_fort ON fort_names(fort_id);
 CREATE INDEX IF NOT EXISTS idx_events_fort ON fort_events(fort_id);

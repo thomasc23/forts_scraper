@@ -11,16 +11,17 @@ This is a web scraper for extracting structured data about North American milita
 - Data stored in SQLite database (`data/forts.db`)
 - Exported to CSV (`data/forts.csv`, `data/fort_periods.csv`)
 
-**Part 2 (Next):** Geocoding
-- Need to convert `location_text` field to lat/lon coordinates
-- Plan to use Nominatim (OpenStreetMap) via geopy library
-- Must handle rate limiting (1 request/second for Nominatim)
-- Should store geocoding confidence levels
+**Part 2 (In Progress):** Geocoding
+- Using Google Geocoding API for accuracy
+- Handles "near X" patterns (marked as approximate confidence)
+- Confidence levels: exact, locality, approximate, county, state, failed
+- ~80 seconds to geocode all 4,005 forts with Google API
 
 ## Key Files
 
 - `scraper.py` - Main CLI entry point
 - `parser.py` - HTML parsing logic (uses regex on raw HTML to find fort entries)
+- `geocoder.py` - Geocoding logic (Google Geocoding API)
 - `db.py` - Database operations
 - `schema.sql` - SQLite schema definition
 - `config.py` - Configuration constants
@@ -33,11 +34,12 @@ The main tables are:
 - `fort_names` - Alternate name history
 - `fort_events` - Historical events
 
-For geocoding, we need to add columns to `forts`:
+Geocoding columns in `forts` table:
 - `lat` - Latitude
 - `lon` - Longitude
-- `geocode_confidence` - How confident the geocoding is (exact, locality, county, state)
-- `geocode_source` - Which service was used
+- `geocode_confidence` - exact, locality, approximate, county, state, failed
+- `geocode_source` - google, nominatim, manual
+- `geocode_query` - The query string used for geocoding
 - `geocoded_at` - Timestamp
 
 ## HTML Parsing Pattern
@@ -72,4 +74,13 @@ python scraper.py --export
 
 # Show stats
 python scraper.py --stats
+
+# Geocoding commands
+python scraper.py --geocode --api-key YOUR_KEY    # Geocode all pending forts
+python scraper.py --geocode --geocode-limit 100   # Test with 100 forts
+python scraper.py --geocode-stats                 # Show geocoding progress
+
+# Or use environment variable for API key
+export GOOGLE_GEOCODING_API_KEY=your_key
+python scraper.py --geocode
 ```
